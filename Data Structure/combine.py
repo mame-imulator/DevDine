@@ -64,66 +64,93 @@ class CustomerOrderUI:
 #Kitchen interface
 class KitchenManager:
     def __init__(self):
-        self.menu_orders = {}
+        # Instead of dict of dishes, store all orders in a list
+        self.orders = []  # each entry: {"dish": str, "table": int, "remarks": str, "locked": bool, "batch": int}
+        self.batch_counter = 0  # track batches
 
     def add_order(self, dish_name, table_number, remarks=""):
-        order = {"table": table_number, "remarks": remarks}
-        if dish_name not in self.menu_orders:
-            self.menu_orders[dish_name] = []
+        """Add a new order for a dish."""
+        # Find any unlocked batch for this dish
+        unlocked_batches = [o["batch"] for o in self.orders if o["dish"] == dish_name and not o["locked"]]
+        if unlocked_batches:
+            batch_id = unlocked_batches[-1]
+        else:
+            self.batch_counter += 1
+            batch_id = self.batch_counter
 
-        if not self.menu_orders[dish_name] or self.menu_orders[dish_name][-1]["locked"]:
-            self.menu_orders[dish_name].append({"locked": False, "orders": []})
-
-        self.menu_orders[dish_name][-1]["orders"].append(order)
+        self.orders.append({
+            "dish": dish_name,
+            "table": table_number,
+            "remarks": remarks,
+            "locked": False,
+            "batch": batch_id
+        })
 
     def lock_batch(self, dish_name):
-        if dish_name in self.menu_orders:
-            for batch in reversed(self.menu_orders[dish_name]):
-                if not batch["locked"]:
-                    batch["locked"] = True
-                    return True
+        """Lock the most recent unlocked batch for this dish."""
+        # Find latest unlocked batch for this dish
+        batches = sorted(
+            {o["batch"] for o in self.orders if o["dish"] == dish_name},
+            reverse=True
+        )
+        for b in batches:
+            if any(o["dish"] == dish_name and o["batch"] == b and not o["locked"] for o in self.orders):
+                for o in self.orders:
+                    if o["dish"] == dish_name and o["batch"] == b:
+                        o["locked"] = True
+                return True
         return False
 
     def get_unlocked_batches(self):
-        """Return dict of dish -> unlocked batch (only latest if multiple)."""
+        """Return dict of dish -> latest unlocked batch info."""
         unlocked = {}
-        for dish, batches in self.menu_orders.items():
-            for batch in batches:
-                if not batch["locked"]:
-                    unlocked[dish] = batch
-                    break
+        for dish in {o["dish"] for o in self.orders}:
+            # Get latest unlocked batch for this dish
+            batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish and not o["locked"]})
+            if batches:
+                batch = batches[-1]
+                unlocked[dish] = {
+                    "locked": False,
+                    "orders": [o for o in self.orders if o["dish"] == dish and o["batch"] == batch]
+                }
         return unlocked
 
     def get_locked_batches(self):
+        """Return dict of dish -> list of (batch_index, batch_info)."""
         locked = {}
-        for dish, batches in self.menu_orders.items():
-            for i, batch in enumerate(batches):
-                if batch["locked"]:
-                    if dish not in locked:
-                        locked[dish] = []
-                    locked[dish].append((i, batch))
+        for dish in {o["dish"] for o in self.orders}:
+            dish_batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish and o["locked"]})
+            for b in dish_batches:
+                if dish not in locked:
+                    locked[dish] = []
+                locked[dish].append((
+                    b, {
+                        "locked": True,
+                        "orders": [o for o in self.orders if o["dish"] == dish and o["batch"] == b]
+                    }
+                ))
         return locked
 
     def confirm_batch_done(self, dish_name, batch_index):
-        if dish_name in self.menu_orders:
-            if 0 <= batch_index < len(self.menu_orders[dish_name]):
-                batch = self.menu_orders[dish_name][batch_index]
-                if batch["locked"]:
-                    self.menu_orders[dish_name].pop(batch_index)
-                    if not self.menu_orders[dish_name]:
-                        del self.menu_orders[dish_name]
-                    return True
-        return False
+        """Remove a completed (locked) batch."""
+        before = len(self.orders)
+        self.orders = [o for o in self.orders if not (o["dish"] == dish_name and o["batch"] == batch_index)]
+        return len(self.orders) < before
 
     def print_all_orders(self):
-        for dish, batches in self.menu_orders.items():
+        """Debug printout of all orders."""
+        dishes = sorted({o["dish"] for o in self.orders})
+        for dish in dishes:
             print(f"\n{dish}:")
-            for i, batch in enumerate(batches):
-                status = "🔒" if batch["locked"] else "🔓"
-                print(f"  Batch {i} {status}")
-                for order in batch["orders"]:
-                    remarks = f" ({order['remarks']})" if order["remarks"] else ""
-                    print(f"    - Table {order['table']}{remarks}")
+            batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish})
+            for b in batches:
+                locked = any(o["locked"] for o in self.orders if o["dish"] == dish and o["batch"] == b)
+                status = "🔒" if locked else "🔓"
+                print(f"  Batch {b} {status}")
+                for o in [o for o in self.orders if o["dish"] == dish and o["batch"] == b]:
+                    remarks = f" ({o['remarks']})" if o["remarks"] else ""
+                    print(f"    - Table {o['table']}{remarks}")
+
 
 
 class ChefInterface:
@@ -206,7 +233,7 @@ class ChefInterface:
             self.refresh_interface()
 
 def refresh_kitchen_window():
-    kitchen_manager.add_order("Tom Yum Kung", 1, "xxxxxx")
+    #kitchen_manager.add_order("Tom Yum Kung", 1, "xxxxxx")
     kitchen_window.refresh_interface()
     kitchen_root.after(5000, refresh_kitchen_window)
     
@@ -214,24 +241,24 @@ def refresh_kitchen_window():
             
 # Main program
 if __name__ == "__main__":
-    order_manager = KitchenManager()
-    kitchen_manager = KitchenManager()
-
+    kitchen_manager = KitchenManager()  # shared object
+    '''
     # Simulating customer orders
     kitchen_manager.add_order("Margherita Pizza", 1, "no olives")
     kitchen_manager.add_order("Margherita Pizza", 2)
     kitchen_manager.add_order("Spaghetti Bolognese", 3, "extra cheese")
     kitchen_manager.add_order("Spaghetti Bolognese", 4, "")
     kitchen_manager.add_order("Caesar Salad", 5, "no dressing")
-
+    '''
+    
     order_root = tk.Tk()
     kitchen_root = tk.Tk()
-    order_window = CustomerOrderUI(order_root, order_manager)
+
+    # BOTH use the same manager
+    order_window = CustomerOrderUI(order_root, kitchen_manager)
     kitchen_window = ChefInterface(kitchen_root, kitchen_manager)
+
     refresh_kitchen_window()
     order_root.mainloop()
     kitchen_root.mainloop()
 
-    # Debug print after GUI closes
-    print("\n--- All Orders Submitted ---")
-    order_manager.print_all_orders()
