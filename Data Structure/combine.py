@@ -102,33 +102,44 @@ class KitchenManager:
         return False
 
     def get_unlocked_batches(self):
-        """Return dict of dish -> latest unlocked batch info."""
+        """Return dict of dish -> latest unlocked batch info (in insertion order)."""
         unlocked = {}
-        for dish in {o["dish"] for o in self.orders}:
+        seen = set()
+
+        for o in self.orders:
+            dish = o["dish"]
+            if dish in seen:
+                continue
+            seen.add(dish)
             # Get latest unlocked batch for this dish
-            batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish and not o["locked"]})
+            batches = sorted({x["batch"] for x in self.orders if x["dish"] == dish and not x["locked"]})
             if batches:
                 batch = batches[-1]
                 unlocked[dish] = {
                     "locked": False,
-                    "orders": [o for o in self.orders if o["dish"] == dish and o["batch"] == batch]
+                    "orders": [x for x in self.orders if x["dish"] == dish and x["batch"] == batch]
                 }
         return unlocked
 
     def get_locked_batches(self):
-        """Return dict of dish -> list of (batch_index, batch_info)."""
+        """Return dict of dish -> list of (batch_index, batch_info), preserving order."""
         locked = {}
-        for dish in {o["dish"] for o in self.orders}:
-            dish_batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish and o["locked"]})
-            for b in dish_batches:
-                if dish not in locked:
-                    locked[dish] = []
-                locked[dish].append((
-                    b, {
-                        "locked": True,
-                        "orders": [o for o in self.orders if o["dish"] == dish and o["batch"] == b]
-                    }
-                ))
+        seen = set()
+
+        for o in self.orders:
+            dish = o["dish"]
+            if dish not in seen:
+                seen.add(dish)
+                dish_batches = sorted({x["batch"] for x in self.orders if x["dish"] == dish and x["locked"]})
+                for b in dish_batches:
+                    if dish not in locked:
+                        locked[dish] = []
+                    locked[dish].append((
+                        b, {
+                            "locked": True,
+                            "orders": [x for x in self.orders if x["dish"] == dish and x["batch"] == b]
+                        }
+                    ))
         return locked
 
     def confirm_batch_done(self, dish_name, batch_index):
