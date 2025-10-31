@@ -262,7 +262,7 @@ class ChefInterface:
             minutes, seconds = divmod(int(batch_time), 60)
             elapsed_str = f"{minutes:02d}:{seconds:02d}"
 
-            dish_label = ttk.Label(self.pending_frame, text=f"{dish} x{total} ⏱ {elapsed_str}", font=("Arial", 12, "bold"))
+            dish_label = ttk.Label(self.pending_frame, text=f"{dish} x{total} [ {elapsed_str} ]", font=("Arial", 12, "bold"))
             dish_label.pack(anchor="w")
 
             for remark in remarks_list:
