@@ -311,6 +311,7 @@ class ChefInterface:
         self.refresh_interface()
         self.root.after(1000, self.update_timers)  # refresh every second
 
+'''
 class WaiterInterface:
     def __init__(self, root, kitchen_manager):
         self.root = root
@@ -393,6 +394,104 @@ class WaiterInterface:
         self.refresh_interface()
         # Optionally refresh chef interface
         kitchen_window.refresh_interface()
+'''
+
+# --- Dine-In Interface for Waiters ---
+class DineInInterface:
+    def __init__(self, root, kitchen_manager):
+        self.root = root
+        self.kitchen = kitchen_manager
+        self.root.title("Dine-In Orders")
+
+        self.frame = ttk.Frame(self.root, padding=20)
+        self.frame.grid()
+
+        ttk.Label(self.frame, text="Ready Dine-In Dishes", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w")
+        self.ready_frame = ttk.Frame(self.frame)
+        self.ready_frame.grid(row=1, column=0, sticky="nw")
+
+        self.refresh_interface()
+
+    def refresh_interface(self):
+        for widget in self.ready_frame.winfo_children():
+            widget.destroy()
+
+        # Only ready dine-in orders (even if partial bill)
+        ready_dishes = [o for o in self.kitchen.orders if o[4] and str(o[1]).startswith("Table:")]
+
+        if not ready_dishes:
+            ttk.Label(self.ready_frame, text="No dishes ready yet.").pack(anchor="w")
+            return
+
+        table_groups = {}
+        for dish, table, remarks, _, _, _ in ready_dishes:
+            table_groups.setdefault(table, []).append((dish, remarks))
+
+        for table, dishes in sorted(table_groups.items(), key=lambda x: int(x[0].split(":")[1])):
+            ttk.Label(self.ready_frame, text=f"Table {table.split(':')[1]}", font=("Arial", 12, "bold")).pack(anchor="w", pady=(5,0))
+            for dish, remarks in dishes:
+                remark_text = f" ({remarks})" if remarks else ""
+                ttk.Label(self.ready_frame, text=f"  - {dish}{remark_text}").pack(anchor="w")
+                ttk.Button(
+                    self.ready_frame,
+                    text="Mark Served",
+                    command=lambda d=dish, t=table: self.mark_served(d, t)
+                ).pack(anchor="w", pady=(0,5))
+
+    def mark_served(self, dish, table):
+        # Remove only this dish from orders
+        self.kitchen.orders = [o for o in self.kitchen.orders if not (o[0]==dish and o[1]==table and o[4])]
+        messagebox.showinfo("Served", f"{dish} for {table} marked as served.")
+        self.refresh_interface()
+
+
+# --- Delivery Interface for Waiters ---
+class DeliveryInterface:
+    def __init__(self, root, kitchen_manager):
+        self.root = root
+        self.kitchen = kitchen_manager
+        self.root.title("Delivery Orders")
+
+        self.frame = ttk.Frame(self.root, padding=20)
+        self.frame.grid()
+
+        ttk.Label(self.frame, text="Ready Delivery Orders", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w")
+        self.ready_frame = ttk.Frame(self.frame)
+        self.ready_frame.grid(row=1, column=0, sticky="nw")
+
+        self.refresh_interface()
+
+    def refresh_interface(self):
+        for widget in self.ready_frame.winfo_children():
+            widget.destroy()
+
+        _, delivery_bills = self.kitchen.get_ready_bills()
+
+        if not delivery_bills:
+            ttk.Label(self.ready_frame, text="No delivery bills ready yet.").pack(anchor="w")
+            return
+
+        for bill_number in delivery_bills:
+            bill_label = tk.Label(self.ready_frame, text=f"Delivery {bill_number}", font=("Arial", 12, "bold"), bg="#ccffcc")
+            bill_label.pack(anchor="w", fill="x", pady=(0,5))
+
+            bill_orders = [o for o in self.kitchen.orders if o[1]==bill_number]
+            for dish, _, remarks, _, _, _ in bill_orders:
+                remark_text = f" ({remarks})" if remarks else ""
+                ttk.Label(self.ready_frame, text=f"  - {dish}{remark_text}").pack(anchor="w")
+
+            ttk.Button(
+                self.ready_frame,
+                text="Mark as Packed",
+                command=lambda b=bill_number: self.mark_packed(b)
+            ).pack(anchor="w", pady=(0,10))
+
+    def mark_packed(self, bill_number):
+        self.kitchen.orders = [o for o in self.kitchen.orders if o[1]!=bill_number]
+        messagebox.showinfo("Packed", f"Delivery {bill_number} marked as packed.")
+        self.refresh_interface()
+        kitchen_window.refresh_interface()
+
 
 # ============================
 # Main program
@@ -400,36 +499,34 @@ class WaiterInterface:
 if __name__ == "__main__":
     kitchen_manager = KitchenManager()
 
-    # Example bills (queue of delivery orders)
+    # Example delivery queue
     kitchen_manager.add_bill_to_queue(1001, [["Margherita Pizza", "extra cheese"], ["Caesar Salad", ""]])
     kitchen_manager.add_bill_to_queue(1002, [["Tomato Soup", ""], ["Grilled Chicken", "no sauce"], ["Spaghetti Bolognese", "extra meat"]])
 
     order_root = tk.Tk()
     kitchen_root = tk.Tk()
-    waiter_root = tk.Tk()
+    dinein_root = tk.Tk()
+    delivery_root = tk.Tk()
 
     order_window = CustomerOrderUI(order_root, kitchen_manager)
     kitchen_window = ChefInterface(kitchen_root, kitchen_manager)
-    waiter_window = WaiterInterface(waiter_root, kitchen_manager)
+    dinein_window = DineInInterface(dinein_root, kitchen_manager)
+    delivery_window = DeliveryInterface(delivery_root, kitchen_manager)
 
     def update_kitchen_ui():
-        # Feed one item from delivery queue
         fed = kitchen_manager.feed_next_item_to_kitchen()
         if fed:
             print(f"➡️ Sent '{fed}' to kitchen")
 
-        # Refresh the chef and waiter interfaces
         kitchen_window.refresh_interface()
-        waiter_window.refresh_interface()
+        dinein_window.refresh_interface()
+        delivery_window.refresh_interface()
 
-        # Schedule this function to run again after 3 seconds
         kitchen_root.after(3000, update_kitchen_ui)
-
-
-        # Start feeding queued orders automatically
-
 
     update_kitchen_ui()
 
     order_root.mainloop()
     kitchen_root.mainloop()
+    dinein_root.mainloop()
+    delivery_root.mainloop()
