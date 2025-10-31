@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from collections import deque
+import time  # For batch timers
 
 # Customer-facing UI
 class CustomerOrderUI:
@@ -54,116 +56,165 @@ class CustomerOrderUI:
             messagebox.showerror("Input Error", "Table number must be a number.")
             return
 
-        self.kitchen.add_order(dish, int(table_number), remarks)
+        self.kitchen.add_order(dish, "Table:" + table_number, remarks)
         messagebox.showinfo("Order Placed", f"Order for '{dish}' placed successfully!")
         
         # Clear form
         self.table_entry.delete(0, tk.END)
         self.remarks_entry.delete(0, tk.END)
 
-#Kitchen interface
+# Kitchen interface
 class KitchenManager:
     def __init__(self):
-        # Instead of dict of dishes, store all orders in a list
-        self.orders = []  # each entry: {"dish": str, "table": int, "remarks": str, "locked": bool, "batch": int}
-        self.batch_counter = 0  # track batches
+        # list of [dish, bill_number, remarks, locked, ready, batch, timestamp]
+        self.orders = []
+        # list of [dish, batch_id, locked, timestamp]
+        self.batches = []
+        self.batch_counter = 0
 
-    def add_order(self, dish_name, table_number, remarks=""):
-        """Add a new order for a dish."""
-        # Find any unlocked batch for this dish
-        unlocked_batches = [o["batch"] for o in self.orders if o["dish"] == dish_name and not o["locked"]]
+        # Queue of bills: each = [bill_number, [ [dish, remarks], ... ]]
+        self.bill_queue = deque()
+
+    # ---------------------
+    # Queue-related methods
+    # ---------------------
+    def add_bill_to_queue(self, bill_number, items):
+        """Add a bill (delivery order) to the queue."""
+        self.bill_queue.append(["Bill:"+str(bill_number), items])
+
+    def feed_next_item_to_kitchen(self):
+        """Take one item from the first bill in the queue and add to kitchen."""
+        if not self.bill_queue:
+            return None
+
+        bill = self.bill_queue[0]
+        bill_number, items = bill[0], bill[1]
+
+        if not items:
+            self.bill_queue.popleft()
+            return None
+
+        dish, remarks = items.pop(0)
+
+        # Find unlocked batch for this dish
+        unlocked_batches = [b[1] for b in self.batches if b[0] == dish and not b[2]]
         if unlocked_batches:
             batch_id = unlocked_batches[-1]
         else:
             self.batch_counter += 1
             batch_id = self.batch_counter
+            self.batches.append([dish, batch_id, False, time.time()])  # unlocked, with timestamp
 
-        self.orders.append({
-            "dish": dish_name,
-            "table": table_number,
-            "remarks": remarks,
-            "locked": False,
-            "batch": batch_id
-        })
+        # Add order
+        self.orders.append([dish, bill_number, remarks, False, False, batch_id])
 
-    def lock_batch(self, dish_name):
-        """Lock the most recent unlocked batch for this dish."""
-        # Find latest unlocked batch for this dish
-        batches = sorted(
-            {o["batch"] for o in self.orders if o["dish"] == dish_name},
-            reverse=True
-        )
-        for b in batches:
-            if any(o["dish"] == dish_name and o["batch"] == b and not o["locked"] for o in self.orders):
+        # Remove bill if all items sent
+        if not items:
+            self.bill_queue.popleft()
+
+        return dish
+
+    # ---------------------
+    # Batch and status logic
+    # ---------------------
+    def lock_batch(self, dish):
+        """Lock the latest batch for a dish."""
+        for i in range(len(self.batches) - 1, -1, -1):
+            b = self.batches[i]
+            if b[0] == dish and not b[2]:
+                b[2] = True
                 for o in self.orders:
-                    if o["dish"] == dish_name and o["batch"] == b:
-                        o["locked"] = True
+                    if o[0] == dish and o[5] == b[1]:
+                        o[3] = True
                 return True
         return False
 
+    def confirm_batch_done(self, dish, batch_index):
+        """Mark batch as ready."""
+        updated = False
+        for o in self.orders:
+            if o[0] == dish and o[5] == batch_index and o[3]:
+                o[4] = True
+                updated = True
+        return updated
+
     def get_unlocked_batches(self):
-        """Return dict of dish -> latest unlocked batch info (in insertion order)."""
-        unlocked = {}
-        seen = set()
+        """Return unlocked batches as list of [dish, orders]."""
+        unlocked = []
+        seen = []
 
         for o in self.orders:
-            dish = o["dish"]
-            if dish in seen:
-                continue
-            seen.add(dish)
-            # Get latest unlocked batch for this dish
-            batches = sorted({x["batch"] for x in self.orders if x["dish"] == dish and not x["locked"]})
-            if batches:
-                batch = batches[-1]
-                unlocked[dish] = {
-                    "locked": False,
-                    "orders": [x for x in self.orders if x["dish"] == dish and x["batch"] == batch]
-                }
+            dish = o[0]
+            if dish not in seen:
+                seen.append(dish)
+                batch_ids = []
+                for x in self.orders:
+                    if x[0] == dish and not x[3]:
+                        batch_ids.append(x[5])
+                if batch_ids:
+                    latest_batch = max(batch_ids)
+                    orders = [x for x in self.orders if x[0] == dish and x[5] == latest_batch]
+                    unlocked.append([dish, orders])
         return unlocked
 
     def get_locked_batches(self):
-        """Return dict of dish -> list of (batch_index, batch_info), preserving order."""
-        locked = {}
-        seen = set()
+        """Return locked batches as list of [dish, batch_id, orders]."""
+        locked = []
+        added = []
 
         for o in self.orders:
-            dish = o["dish"]
-            if dish not in seen:
-                seen.add(dish)
-                dish_batches = sorted({x["batch"] for x in self.orders if x["dish"] == dish and x["locked"]})
-                for b in dish_batches:
-                    if dish not in locked:
-                        locked[dish] = []
-                    locked[dish].append((
-                        b, {
-                            "locked": True,
-                            "orders": [x for x in self.orders if x["dish"] == dish and x["batch"] == b]
-                        }
-                    ))
+            dish = o[0]
+            if dish not in added:
+                added.append(dish)
+                for b in self.batches:
+                    if b[0] == dish and b[2]:
+                        batch_id = b[1]
+                        orders = [x for x in self.orders if x[0] == dish and x[5] == batch_id and not x[4]]
+                        if orders:
+                            locked.append([dish, batch_id, orders])
         return locked
 
-    def confirm_batch_done(self, dish_name, batch_index):
-        """Remove a completed (locked) batch."""
-        before = len(self.orders)
-        self.orders = [o for o in self.orders if not (o["dish"] == dish_name and o["batch"] == batch_index)]
-        return len(self.orders) < before
+    def add_order(self, dish, bill_number, remarks=""):
+        """Directly add a customer order (table order) to kitchen orders."""
+        # Find unlocked batch for this dish
+        unlocked_batches = [b[1] for b in self.batches if b[0] == dish and not b[2]]
+        if unlocked_batches:
+            batch_id = unlocked_batches[-1]
+        else:
+            self.batch_counter += 1
+            batch_id = self.batch_counter
+            self.batches.append([dish, batch_id, False, time.time()])  # unlocked with timestamp
 
-    def print_all_orders(self):
-        """Debug printout of all orders."""
-        dishes = sorted({o["dish"] for o in self.orders})
-        for dish in dishes:
-            print(f"\n{dish}:")
-            batches = sorted({o["batch"] for o in self.orders if o["dish"] == dish})
-            for b in batches:
-                locked = any(o["locked"] for o in self.orders if o["dish"] == dish and o["batch"] == b)
-                status = "🔒" if locked else "🔓"
-                print(f"  Batch {b} {status}")
-                for o in [o for o in self.orders if o["dish"] == dish and o["batch"] == b]:
-                    remarks = f" ({o['remarks']})" if o["remarks"] else ""
-                    print(f"    - Table {o['table']}{remarks}")
+        self.orders.append([dish, bill_number, remarks, False, False, batch_id])
 
+    def get_ready_bills(self):
+        """Return sorted lists: ready dine-in bills and ready delivery bills."""
+        dine_in = []
+        delivery = []
 
+        all_bills = set(o[1] for o in self.orders)
 
+        for bill in all_bills:
+            bill_orders = [o for o in self.orders if o[1] == bill]
+            if bill_orders and all(o[4] for o in bill_orders):
+                # Check if it's dine-in (bill number starts with "Table: ") or delivery
+                if any(str(o[1]).startswith("Table:") for o in bill_orders):
+                    dine_in.append(bill)
+                else:
+                    delivery.append(bill)
+
+        # Sort dine-in bills numerically by table number
+        def table_number_key(bill):
+            for o in self.orders:
+                if o[1] == bill and str(o[1]).startswith("Table:"):
+                    return int(str(o[1]).split(":")[1])
+            return float('inf')
+
+        dine_in.sort(key=table_number_key)
+        delivery.sort()
+        return dine_in, delivery
+
+# Chef interface
 class ChefInterface:
     def __init__(self, root, kitchen_manager):
         self.root = root
@@ -187,6 +238,7 @@ class ChefInterface:
         self.preparing_frame.grid(row=1, column=1, sticky="nw", padx=(40, 0))
 
         self.refresh_interface()
+        self.update_timers()  # start the timers
 
     def refresh_interface(self):
         for widget in self.pending_frame.winfo_children():
@@ -196,11 +248,21 @@ class ChefInterface:
 
         # Pending Orders (unlocked)
         unlocked = self.kitchen.get_unlocked_batches()
-        for dish, batch in unlocked.items():
-            remarks_list = [f"Table {o['table']}: {o['remarks'] or '-'}" for o in batch["orders"]]
-            total = len(batch["orders"])
+        for dish, batch_orders in unlocked:
+            remarks_list = [f"{o[1]}: {o[2] or '-'}" for o in batch_orders]
+            total = len(batch_orders)
 
-            dish_label = ttk.Label(self.pending_frame, text=f"{dish} x{total}", font=("Arial", 12, "bold"))
+            # Get batch timestamp
+            batch_id = batch_orders[0][5]
+            batch_time = 0
+            for b in self.kitchen.batches:
+                if b[1] == batch_id:
+                    batch_time = time.time() - b[3]  # timestamp at index 3
+                    break
+            minutes, seconds = divmod(int(batch_time), 60)
+            elapsed_str = f"{minutes:02d}:{seconds:02d}"
+
+            dish_label = ttk.Label(self.pending_frame, text=f"{dish} x{total} ⏱ {elapsed_str}", font=("Arial", 12, "bold"))
             dish_label.pack(anchor="w")
 
             for remark in remarks_list:
@@ -215,23 +277,22 @@ class ChefInterface:
 
         # Preparing Orders (locked)
         locked = self.kitchen.get_locked_batches()
-        for dish, batches in locked.items():
-            for index, batch in batches:
-                remarks_list = [f"Table {o['table']}: {o['remarks'] or '-'}" for o in batch["orders"]]
-                total = len(batch["orders"])
+        for dish, batch_id, batch_orders in locked:
+            remarks_list = [f"{o[1]}: {o[2] or '-'}" for o in batch_orders]
+            total = len(batch_orders)
 
-                batch_label = ttk.Label(self.preparing_frame, text=f"{dish} x{total}", font=("Arial", 12, "bold"))
-                batch_label.pack(anchor="w")
+            batch_label = ttk.Label(self.preparing_frame, text=f"{dish} x{total}", font=("Arial", 12, "bold"))
+            batch_label.pack(anchor="w")
 
-                for remark in remarks_list:
-                    ttk.Label(self.preparing_frame, text=f"  - {remark}").pack(anchor="w")
+            for remark in remarks_list:
+                ttk.Label(self.preparing_frame, text=f"  - {remark}").pack(anchor="w")
 
-                done_btn = ttk.Button(
-                    self.preparing_frame,
-                    text="Done",
-                    command=lambda d=dish, i=index: self.mark_done(d, i)
-                )
-                done_btn.pack(anchor="w", pady=(0, 10))
+            done_btn = ttk.Button(
+                self.preparing_frame,
+                text="Done",
+                command=lambda d=dish, i=batch_id: self.mark_done(d, i)
+            )
+            done_btn.pack(anchor="w", pady=(0, 10))
 
     def lock_menu(self, dish_name):
         success = self.kitchen.lock_batch(dish_name)
@@ -242,34 +303,133 @@ class ChefInterface:
         success = self.kitchen.confirm_batch_done(dish_name, batch_index)
         if success:
             self.refresh_interface()
+            ready_bills = self.kitchen.get_ready_bills()
+            if ready_bills:
+                messagebox.showinfo("Delivery Ready", f"Bills ready for packing: {', '.join(map(str, ready_bills))}")
 
-def refresh_kitchen_window():
-    #kitchen_manager.add_order("Tom Yum Kung", 1, "xxxxxx")
-    kitchen_window.refresh_interface()
-    kitchen_root.after(5000, refresh_kitchen_window)
-    
-#=================
-            
+    def update_timers(self):
+        self.refresh_interface()
+        self.root.after(1000, self.update_timers)  # refresh every second
+
+class WaiterInterface:
+    def __init__(self, root, kitchen_manager):
+        self.root = root
+        self.kitchen = kitchen_manager
+        self.root.title("Waiter / Delivery Interface")
+
+        self.frame = ttk.Frame(self.root, padding=20)
+        self.frame.grid()
+
+        ttk.Label(self.frame, text="Ready Orders", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w")
+
+        self.ready_frame = ttk.Frame(self.frame)
+        self.ready_frame.grid(row=1, column=0, sticky="nw")
+
+        self.refresh_interface()
+
+    def refresh_interface(self):
+        # Clear current ready orders
+        for widget in self.ready_frame.winfo_children():
+            widget.destroy()
+
+        # Get ready bills
+        dine_in_bills, delivery_bills = self.kitchen.get_ready_bills()
+
+        if not dine_in_bills and not delivery_bills:
+            ttk.Label(self.ready_frame, text="No bills ready yet.").pack(anchor="w")
+            return
+
+        # Dine-in section
+        if dine_in_bills:
+            ttk.Label(
+                self.ready_frame, 
+                text="🍽️ Dine-In Bills Ready", 
+                font=("Arial", 14, "bold")
+            ).pack(anchor="w", pady=(0,5))
+            for bill_number in dine_in_bills:
+                self._display_bill(bill_number, is_dine_in=True)
+
+        # Delivery section
+        if delivery_bills:
+            ttk.Label(
+                self.ready_frame, 
+                text="📦 Delivery Orders Ready", 
+                font=("Arial", 14, "bold")
+            ).pack(anchor="w", pady=(10,5))
+            for bill_number in delivery_bills:
+                self._display_bill(bill_number, is_dine_in=False)
+
+    def _display_bill(self, bill_number, is_dine_in):
+        # Highlight urgent dine-in tables
+        if is_dine_in:
+            bill_bg = "#6aafff"  # light red for urgent
+            display_name = bill_number
+        else:
+            bill_bg = "#eeabff"  # light green for delivery
+            display_name = "Delivery " + str(bill_number)
+
+        bill_label = tk.Label(
+            self.ready_frame, text=display_name, font=("Arial", 12, "bold"), bg=bill_bg
+        )
+        bill_label.pack(anchor="w", fill="x", pady=(0, 5))
+
+        # List dishes in this bill
+        bill_orders = [o for o in self.kitchen.orders if o[1] == bill_number]
+        for dish, _, remarks, _, _, _ in bill_orders:
+            remark_text = f" ({remarks})" if remarks else ""
+            ttk.Label(self.ready_frame, text=f"  - {dish}{remark_text}").pack(anchor="w")
+
+        # Button to mark as served/packed
+        ttk.Button(
+            self.ready_frame,
+            text="Mark as Served/Packed",
+            command=lambda b=bill_number: self.mark_served(b)
+        ).pack(anchor="w", pady=(0, 10))
+
+    def mark_served(self, bill_number):
+        # Remove all orders of this bill from the main order list
+        self.kitchen.orders = [o for o in self.kitchen.orders if o[1] != bill_number]
+        messagebox.showinfo("Served", f"{bill_number} marked as served/packed.")
+        self.refresh_interface()
+        # Optionally refresh chef interface
+        kitchen_window.refresh_interface()
+
+# ============================
 # Main program
+# ============================
 if __name__ == "__main__":
-    kitchen_manager = KitchenManager()  # shared object
-    '''
-    # Simulating customer orders
-    kitchen_manager.add_order("Margherita Pizza", 1, "no olives")
-    kitchen_manager.add_order("Margherita Pizza", 2)
-    kitchen_manager.add_order("Spaghetti Bolognese", 3, "extra cheese")
-    kitchen_manager.add_order("Spaghetti Bolognese", 4, "")
-    kitchen_manager.add_order("Caesar Salad", 5, "no dressing")
-    '''
-    
+    kitchen_manager = KitchenManager()
+
+    # Example bills (queue of delivery orders)
+    kitchen_manager.add_bill_to_queue(1001, [["Margherita Pizza", "extra cheese"], ["Caesar Salad", ""]])
+    kitchen_manager.add_bill_to_queue(1002, [["Tomato Soup", ""], ["Grilled Chicken", "no sauce"], ["Spaghetti Bolognese", "extra meat"]])
+
     order_root = tk.Tk()
     kitchen_root = tk.Tk()
+    waiter_root = tk.Tk()
 
-    # BOTH use the same manager
     order_window = CustomerOrderUI(order_root, kitchen_manager)
     kitchen_window = ChefInterface(kitchen_root, kitchen_manager)
+    waiter_window = WaiterInterface(waiter_root, kitchen_manager)
 
-    refresh_kitchen_window()
+    def update_kitchen_ui():
+        # Feed one item from delivery queue
+        fed = kitchen_manager.feed_next_item_to_kitchen()
+        if fed:
+            print(f"➡️ Sent '{fed}' to kitchen")
+
+        # Refresh the chef and waiter interfaces
+        kitchen_window.refresh_interface()
+        waiter_window.refresh_interface()
+
+        # Schedule this function to run again after 3 seconds
+        kitchen_root.after(3000, update_kitchen_ui)
+
+
+        # Start feeding queued orders automatically
+
+
+    update_kitchen_ui()
+
     order_root.mainloop()
     kitchen_root.mainloop()
-
