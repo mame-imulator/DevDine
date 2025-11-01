@@ -1,10 +1,170 @@
 # Application Flow: Restaurant Order Management System
 
+**Input Collection**
+
 ```mermaid
 graph TD
 
+    subgraph 90df74f5-group["**Diagram**<br>[External]"]
+        subgraph 90df74f5-ChefUI["**4. Chef Interface**<br>ChefInterface<br>[External]"]
+            90df74f5-H1["**ChefInterface**<br>Chef's view of orders<br>[External]"]
+            90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-H3["**Pending Orders Display**<br>From get\_unlocked\_batches()<br>[External]"]
+            90df74f5-H4["**Preparing Menu Display**<br>From get\_locked\_batches()<br>[External]"]
+            90df74f5-H5["**lock\_menu()**<br>User clicks 'Confirm'<br>[External]"]
+            90df74f5-H6["**mark\_done()**<br>User clicks 'Done'<br>[External]"]
+            90df74f5-H7["**Delivery Ready Message**<br>messagebox.showinfo()<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-H1["**ChefInterface**<br>Chef's view of orders<br>[External]"] -->|"Triggers"| 90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-H3["**Pending Orders Display**<br>From get\_unlocked\_batches()<br>[External]"] -->|"User action"| 90df74f5-H5["**lock\_menu()**<br>User clicks 'Confirm'<br>[External]"]
+            90df74f5-H4["**Preparing Menu Display**<br>From get\_locked\_batches()<br>[External]"] -->|"User action"| 90df74f5-H6["**mark\_done()**<br>User clicks 'Done'<br>[External]"]
+        end
+        subgraph 90df74f5-CustomerOrder["**2. Customer Order Placement**<br>CustomerOrderUI<br>[External]"]
+            90df74f5-C1["**CustomerOrderUI**<br>Customer-facing interface<br>[External]"]
+            90df74f5-C2["**Input Collection**<br>Table #, Dish, Remarks<br>[External]"]
+            90df74f5-C3["**Input Validation**<br>table\_number.isdigit()<br>[External]"]
+            90df74f5-C4["**submit\_order()**<br>Place Order button click<br>[External]"]
+            90df74f5-C5["**kitchen\_manager.add\_order()**<br>Adds dine-in order to KitchenManager<br>[External]"]
+            90df74f5-C6["**UI Feedback**<br>messagebox.showinfo(), clear form<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-C1["**CustomerOrderUI**<br>Customer-facing interface<br>[External]"] -->|"Builds"| 90df74f5-C2["**Input Collection**<br>Table #, Dish, Remarks<br>[External]"]
+            90df74f5-C2["**Input Collection**<br>Table #, Dish, Remarks<br>[External]"] -->|"Triggers"| 90df74f5-C4["**submit\_order()**<br>Place Order button click<br>[External]"]
+            90df74f5-C4["**submit\_order()**<br>Place Order button click<br>[External]"] -->|"Performs"| 90df74f5-C3["**Input Validation**<br>table\_number.isdigit()<br>[External]"]
+            90df74f5-C4["**submit\_order()**<br>Place Order button click<br>[External]"] -->|"Invalid"| 90df74f5-C6["**UI Feedback**<br>messagebox.showinfo(), clear form<br>[External]"]
+            90df74f5-C3["**Input Validation**<br>table\_number.isdigit()<br>[External]"] -->|"Valid"| 90df74f5-C5["**kitchen\_manager.add\_order()**<br>Adds dine-in order to KitchenManager<br>[External]"]
+            90df74f5-C5["**kitchen\_manager.add\_order()**<br>Adds dine-in order to KitchenManager<br>[External]"] -->|"Provides"| 90df74f5-C6["**UI Feedback**<br>messagebox.showinfo(), clear form<br>[External]"]
+        end
+        subgraph 90df74f5-Init["**1. System Initialization**<br>Application Startup<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"]
+            90df74f5-A2["**KitchenManager Instance**<br>Manages all orders/batches<br>[External]"]
+            90df74f5-A3["**Delivery Queue Seeding**<br>kitchen\_manager.add\_bill\_to\_queue()<br>[External]"]
+            90df74f5-A4["**Tkinter Root Windows**<br>tk.Tk() for each UI<br>[External]"]
+            90df74f5-A5["**UI Instances Created**<br>CustomerOrderUI, ChefInterface, etc.<br>[External]"]
+            90df74f5-A6["**Initial update\_kitchen\_ui() Call**<br>Starts periodic updates<br>[External]"]
+            90df74f5-A7["**Tkinter mainloop()**<br>Starts UI event loops<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Creates"| 90df74f5-A2["**KitchenManager Instance**<br>Manages all orders/batches<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Adds initial orders to"| 90df74f5-A3["**Delivery Queue Seeding**<br>kitchen\_manager.add\_bill\_to\_queue()<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Creates"| 90df74f5-A4["**Tkinter Root Windows**<br>tk.Tk() for each UI<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Instantiates UIs with"| 90df74f5-A5["**UI Instances Created**<br>CustomerOrderUI, ChefInterface, etc.<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Invokes"| 90df74f5-A6["**Initial update\_kitchen\_ui() Call**<br>Starts periodic updates<br>[External]"]
+            90df74f5-A1["**Main Program**<br>if **name** == '**main**'<br>[External]"] -->|"Starts"| 90df74f5-A7["**Tkinter mainloop()**<br>Starts UI event loops<br>[External]"]
+            90df74f5-A5["**UI Instances Created**<br>CustomerOrderUI, ChefInterface, etc.<br>[External]"] -->|"References"| 90df74f5-A2["**KitchenManager Instance**<br>Manages all orders/batches<br>[External]"]
+        end
+        subgraph 90df74f5-KitchenCore["**3. Kitchen Management Core**<br>KitchenManager Logic<br>[External]"]
+            90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+            90df74f5-K10["**get\_unlocked\_batches()**<br>Query for ChefInterface<br>[External]"]
+            90df74f5-K11["**get\_locked\_batches()**<br>Query for ChefInterface<br>[External]"]
+            90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"]
+            90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K4["**self.bill\_queue deque**<br>Delivery bills [bill#, [[dish, remarks],...]]<br>[External]"]
+            90df74f5-K5["**add\_order()**<br>For dine-in/direct add<br>[External]"]
+            90df74f5-K6["**add\_bill\_to\_queue()**<br>For initial delivery setup<br>[External]"]
+            90df74f5-K7["**feed\_next\_item\_to\_kitchen()**<br>Periodically moves delivery items to orders<br>[External]"]
+            90df74f5-K8["**lock\_batch()**<br>Marks orders in a batch as locked<br>[External]"]
+            90df74f5-K9["**confirm\_batch\_done()**<br>Marks orders in a batch as ready<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"] -->|"Manages"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"] -->|"Manages"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"] -->|"Manages"| 90df74f5-K4["**self.bill\_queue deque**<br>Delivery bills [bill#, [[dish, remarks],...]]<br>[External]"]
+            90df74f5-K5["**add\_order()**<br>For dine-in/direct add<br>[External]"] -->|"Modifies"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K5["**add\_order()**<br>For dine-in/direct add<br>[External]"] -->|"Modifies"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K6["**add\_bill\_to\_queue()**<br>For initial delivery setup<br>[External]"] -->|"Modifies"| 90df74f5-K4["**self.bill\_queue deque**<br>Delivery bills [bill#, [[dish, remarks],...]]<br>[External]"]
+            90df74f5-K7["**feed\_next\_item\_to\_kitchen()**<br>Periodically moves delivery items to orders<br>[External]"] -->|"Reads from"| 90df74f5-K4["**self.bill\_queue deque**<br>Delivery bills [bill#, [[dish, remarks],...]]<br>[External]"]
+            90df74f5-K7["**feed\_next\_item\_to\_kitchen()**<br>Periodically moves delivery items to orders<br>[External]"] -->|"Modifies"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K7["**feed\_next\_item\_to\_kitchen()**<br>Periodically moves delivery items to orders<br>[External]"] -->|"Modifies"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K8["**lock\_batch()**<br>Marks orders in a batch as locked<br>[External]"] -->|"Modifies"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K8["**lock\_batch()**<br>Marks orders in a batch as locked<br>[External]"] -->|"Modifies"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K9["**confirm\_batch\_done()**<br>Marks orders in a batch as ready<br>[External]"] -->|"Modifies"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K10["**get\_unlocked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Reads from"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K10["**get\_unlocked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Reads from"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K11["**get\_locked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Reads from"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+            90df74f5-K11["**get\_locked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Reads from"| 90df74f5-K3["**self.batches list**<br>[dish, batch\_id, locked, timestamp]<br>[External]"]
+            90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"] -->|"Reads from"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+        end
+        subgraph 90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"]
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"]
+            90df74f5-M2["**kitchen\_manager.feed\_next\_item\_to\_kitchen()**<br>Moves delivery items<br>[External]"]
+            90df74f5-M3["**kitchen\_window.refresh\_interface()**<br>Updates Chef UI<br>[External]"]
+            90df74f5-M4["**dinein\_window.refresh\_interface()**<br>Updates Dine-In UI<br>[External]"]
+            90df74f5-M5["**delivery\_window.refresh\_interface()**<br>Updates Delivery UI<br>[External]"]
+            90df74f5-M6["**root.after(3000, update\_kitchen\_ui)**<br>Schedules next run<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"] -->|"Calls"| 90df74f5-M2["**kitchen\_manager.feed\_next\_item\_to\_kitchen()**<br>Moves delivery items<br>[External]"]
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"] -->|"Calls"| 90df74f5-M3["**kitchen\_window.refresh\_interface()**<br>Updates Chef UI<br>[External]"]
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"] -->|"Calls"| 90df74f5-M4["**dinein\_window.refresh\_interface()**<br>Updates Dine-In UI<br>[External]"]
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"] -->|"Calls"| 90df74f5-M5["**delivery\_window.refresh\_interface()**<br>Updates Delivery UI<br>[External]"]
+            90df74f5-M1["**update\_kitchen\_ui()**<br>Periodic scheduler<br>[External]"] -->|"Schedules"| 90df74f5-M6["**root.after(3000, update\_kitchen\_ui)**<br>Schedules next run<br>[External]"]
+        end
+        subgraph 90df74f5-WaiterUIs["**5. Waiter Interfaces**<br>DineInInterface and DeliveryInterface<br>[External]"]
+            90df74f5-D1["**DineInInterface**<br>Waiter's view for dine-in<br>[External]"]
+            90df74f5-D2["**DineIn refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-D3["**Ready Dine-In Dishes Display**<br>From filtered kitchen.orders<br>[External]"]
+            90df74f5-D4["**mark\_served()**<br>User clicks 'Mark Served'<br>[External]"]
+            90df74f5-E1["**DeliveryInterface**<br>Waiter's view for delivery<br>[External]"]
+            90df74f5-E2["**Delivery refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-E3["**Ready Delivery Orders Display**<br>From get\_ready\_bills()<br>[External]"]
+            90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"]
+            %% Edges at this level (grouped by source)
+            90df74f5-D1["**DineInInterface**<br>Waiter's view for dine-in<br>[External]"] -->|"Triggers"| 90df74f5-D2["**DineIn refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-D3["**Ready Dine-In Dishes Display**<br>From filtered kitchen.orders<br>[External]"] -->|"User action"| 90df74f5-D4["**mark\_served()**<br>User clicks 'Mark Served'<br>[External]"]
+            90df74f5-D4["**mark\_served()**<br>User clicks 'Mark Served'<br>[External]"] -->|"Triggers"| 90df74f5-D2["**DineIn refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-E1["**DeliveryInterface**<br>Waiter's view for delivery<br>[External]"] -->|"Triggers"| 90df74f5-E2["**Delivery refresh\_interface()**<br>Updates display<br>[External]"]
+            90df74f5-E3["**Ready Delivery Orders Display**<br>From get\_ready\_bills()<br>[External]"] -->|"User action"| 90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"]
+            90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"] -->|"Triggers"| 90df74f5-E2["**Delivery refresh\_interface()**<br>Updates display<br>[External]"]
+        end
+        %% Edges at this level (grouped by source)
+        90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"] -->|"Calls"| 90df74f5-K10["**get\_unlocked\_batches()**<br>Query for ChefInterface<br>[External]"]
+        90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"] -->|"Calls"| 90df74f5-K11["**get\_locked\_batches()**<br>Query for ChefInterface<br>[External]"]
+        90df74f5-K10["**get\_unlocked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Populates"| 90df74f5-H3["**Pending Orders Display**<br>From get\_unlocked\_batches()<br>[External]"]
+        90df74f5-K11["**get\_locked\_batches()**<br>Query for ChefInterface<br>[External]"] -->|"Populates"| 90df74f5-H4["**Preparing Menu Display**<br>From get\_locked\_batches()<br>[External]"]
+        90df74f5-H5["**lock\_menu()**<br>User clicks 'Confirm'<br>[External]"] -->|"Calls"| 90df74f5-K8["**lock\_batch()**<br>Marks orders in a batch as locked<br>[External]"]
+        90df74f5-H5["**lock\_menu()**<br>User clicks 'Confirm'<br>[External]"] -->|"Acts on"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-K8["**lock\_batch()**<br>Marks orders in a batch as locked<br>[External]"] -->|"Updates status, triggers"| 90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"]
+        90df74f5-H6["**mark\_done()**<br>User clicks 'Done'<br>[External]"] -->|"Calls"| 90df74f5-K9["**confirm\_batch\_done()**<br>Marks orders in a batch as ready<br>[External]"]
+        90df74f5-H6["**mark\_done()**<br>User clicks 'Done'<br>[External]"] -->|"Checks"| 90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"]
+        90df74f5-H6["**mark\_done()**<br>User clicks 'Done'<br>[External]"] -->|"Acts on"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-K9["**confirm\_batch\_done()**<br>Marks orders in a batch as ready<br>[External]"] -->|"Updates status, triggers"| 90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"]
+        90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"] -->|"If ready, triggers"| 90df74f5-H7["**Delivery Ready Message**<br>messagebox.showinfo()<br>[External]"]
+        90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"] -->|"Populates"| 90df74f5-E3["**Ready Delivery Orders Display**<br>From get\_ready\_bills()<br>[External]"]
+        90df74f5-D2["**DineIn refresh\_interface()**<br>Updates display<br>[External]"] -->|"Filters"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+        90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"] -->|"Populates"| 90df74f5-D3["**Ready Dine-In Dishes Display**<br>From filtered kitchen.orders<br>[External]"]
+        90df74f5-D4["**mark\_served()**<br>User clicks 'Mark Served'<br>[External]"] -->|"Removes specific order from"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+        90df74f5-D4["**mark\_served()**<br>User clicks 'Mark Served'<br>[External]"] -->|"Acts on"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-E2["**Delivery refresh\_interface()**<br>Updates display<br>[External]"] -->|"Calls"| 90df74f5-K12["**get\_ready\_bills()**<br>Query for Waiter Interfaces<br>[External]"]
+        90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"] -->|"Removes all orders for bill from"| 90df74f5-K2["**self.orders list**<br>[dish, bill#, remarks, locked, ready, batch\_id]<br>[External]"]
+        90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"] -->|"Also triggers"| 90df74f5-H2["**refresh\_interface()**<br>Updates display<br>[External]"]
+        90df74f5-E4["**mark\_packed()**<br>User clicks 'Mark as Packed'<br>[External]"] -->|"Acts on"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-M2["**kitchen\_manager.feed\_next\_item\_to\_kitchen()**<br>Moves delivery items<br>[External]"] -->|"Interacts with"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-M3["**kitchen\_window.refresh\_interface()**<br>Updates Chef UI<br>[External]"] -->|"Interacts with"| 90df74f5-H1["**ChefInterface**<br>Chef's view of orders<br>[External]"]
+        90df74f5-M4["**dinein\_window.refresh\_interface()**<br>Updates Dine-In UI<br>[External]"] -->|"Interacts with"| 90df74f5-D1["**DineInInterface**<br>Waiter's view for dine-in<br>[External]"]
+        90df74f5-M5["**delivery\_window.refresh\_interface()**<br>Updates Delivery UI<br>[External]"] -->|"Interacts with"| 90df74f5-E1["**DeliveryInterface**<br>Waiter's view for delivery<br>[External]"]
+        90df74f5-C5["**kitchen\_manager.add\_order()**<br>Adds dine-in order to KitchenManager<br>[External]"] -->|"Adds orders to"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-A3["**Delivery Queue Seeding**<br>kitchen\_manager.add\_bill\_to\_queue()<br>[External]"] -->|"Initializes"| 90df74f5-K1["**KitchenManager**<br>Central order state management<br>[External]"]
+        90df74f5-Init["**1. System Initialization**<br>Application Startup<br>[External]"] --> 90df74f5-CustomerOrder["**2. Customer Order Placement**<br>CustomerOrderUI<br>[External]"]
+        90df74f5-Init["**1. System Initialization**<br>Application Startup<br>[External]"] --> 90df74f5-ChefUI["**4. Chef Interface**<br>ChefInterface<br>[External]"]
+        90df74f5-Init["**1. System Initialization**<br>Application Startup<br>[External]"] --> 90df74f5-WaiterUIs["**5. Waiter Interfaces**<br>DineInInterface and DeliveryInterface<br>[External]"]
+        90df74f5-Init["**1. System Initialization**<br>Application Startup<br>[External]"] --> 90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"]
+        90df74f5-CustomerOrder["**2. Customer Order Placement**<br>CustomerOrderUI<br>[External]"] --> 90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"]
+        90df74f5-ChefUI["**4. Chef Interface**<br>ChefInterface<br>[External]"] --> 90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"]
+        90df74f5-WaiterUIs["**5. Waiter Interfaces**<br>DineInInterface and DeliveryInterface<br>[External]"] --> 90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"]
+        90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"] --> 90df74f5-ChefUI["**4. Chef Interface**<br>ChefInterface<br>[External]"]
+        90df74f5-MainLoop["**6. Main Application Loop**<br>update\_kitchen\_ui() Function<br>[External]"] --> 90df74f5-WaiterUIs["**5. Waiter Interfaces**<br>DineInInterface and DeliveryInterface<br>[External]"]
+    end
 
 ```
+
+Table #, Dish, Remarks
+---
+**self.orders list**
+[dish, bill#, remarks, locked, ready, batch\_id]
+---
+**self.bill\_queue deque**
+Delivery bills [bill#, [[dish, remarks],...]]
+
+---
+*Generated by [CodeViz.ai](https://codeviz.ai) on 11/2/2025, 12:02:22 AM*
 
 
 This document outlines the operational flow of the restaurant order management system, detailing how customer orders are placed, processed in the kitchen, and eventually served or packed. The system is built around a central `KitchenManager` and several user interface components.
