@@ -359,8 +359,6 @@ class DineInInterface:
         messagebox.showinfo("Served", f"{dish} for {table} marked as served.")
         self.refresh_interface()
 
-
-# --- Delivery Interface for Waiters ---
 class DeliveryInterface:
     def __init__(self, root, kitchen_manager):
         self.root = root
