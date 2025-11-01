@@ -344,7 +344,7 @@ class WaiterInterface:
         if dine_in_bills:
             ttk.Label(
                 self.ready_frame, 
-                text="🍽️ Dine-In Bills Ready", 
+                text="Dine-In Bills Ready", 
                 font=("Arial", 14, "bold")
             ).pack(anchor="w", pady=(0,5))
             for bill_number in dine_in_bills:
@@ -354,7 +354,7 @@ class WaiterInterface:
         if delivery_bills:
             ttk.Label(
                 self.ready_frame, 
-                text="📦 Delivery Orders Ready", 
+                text="Delivery Orders Ready", 
                 font=("Arial", 14, "bold")
             ).pack(anchor="w", pady=(10,5))
             for bill_number in delivery_bills:
@@ -516,7 +516,7 @@ if __name__ == "__main__":
     def update_kitchen_ui():
         fed = kitchen_manager.feed_next_item_to_kitchen()
         if fed:
-            print(f"➡️ Sent '{fed}' to kitchen")
+            print(f"----> Sent '{fed}' to kitchen")
 
         kitchen_window.refresh_interface()
         dinein_window.refresh_interface()
