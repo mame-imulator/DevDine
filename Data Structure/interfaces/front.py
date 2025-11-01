@@ -21,12 +21,11 @@ class KitchenOrderManager:
         for dish, batches in self.menu_orders.items():
             print(f"\n{dish}:")
             for i, batch in enumerate(batches):
-                status = "🔒" if batch["locked"] else "🔓"
+                status = "locked" if batch["locked"] else "unlocked"
                 print(f"  Batch {i} {status}")
                 for order in batch["orders"]:
                     remarks = f" ({order['remarks']})" if order["remarks"] else ""
                     print(f"    - Table {order['table']}{remarks}")
-
 
 # Customer-facing UI
 class CustomerOrderUI:
