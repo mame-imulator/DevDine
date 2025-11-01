@@ -431,7 +431,7 @@ if __name__ == "__main__":
     def update_kitchen_ui():
         fed = kitchen_manager.feed_next_item_to_kitchen()
         if fed:
-            print(f"➡️ Sent '{fed}' to kitchen")
+            print(f"---> Sent '{fed}' to kitchen")
 
         kitchen_window.refresh_interface()
         dinein_window.refresh_interface()
