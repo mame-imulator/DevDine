@@ -4,11 +4,21 @@ from collections import deque
 import time
 
 # -----------------------
-# Kitchen Manager (keeps your original logic, lightly adapted)
+# Kitchen Manager (with completed flag)
 # -----------------------
 class KitchenManager:
+    # index constants to avoid magic numbers
+    IDX_DISH = 0
+    IDX_BILL = 1
+    IDX_REMARK = 2
+    IDX_LOCKED = 3
+    IDX_READY = 4
+    IDX_BATCH = 5
+    IDX_TIMESTAMP = 6
+    IDX_COMPLETED = 7
+
     def __init__(self):
-        # orders: [dish, bill_number, remarks, locked(bool), ready(bool), batch_id, timestamp_added]
+        # orders: [dish, bill_number, remarks, locked(bool), ready(bool), batch_id, timestamp_added, completed(bool)]
         self.orders = []
         # batches: [dish, batch_id, locked(bool), timestamp_created]
         self.batches = []
@@ -37,7 +47,8 @@ class KitchenManager:
             self.batch_counter += 1
             batch_id = self.batch_counter
             self.batches.append([dish, batch_id, False, time.time()])
-        self.orders.append([dish, bill_number, remarks, False, False, batch_id, time.time()])
+        # include completed flag (False initially)
+        self.orders.append([dish, bill_number, remarks, False, False, batch_id, time.time(), False])
         if not items:
             self.bill_queue.popleft()
         return dish
@@ -51,7 +62,7 @@ class KitchenManager:
             self.batch_counter += 1
             batch_id = self.batch_counter
             self.batches.append([dish, batch_id, False, time.time()])
-        self.orders.append([dish, bill_number, remarks, False, False, batch_id, time.time()])
+        self.orders.append([dish, bill_number, remarks, False, False, batch_id, time.time(), False])
 
     # Lock latest unlocked batch for dish (kept for compatibility)
     def lock_batch(self, dish):
@@ -80,20 +91,20 @@ class KitchenManager:
     def confirm_batch_done(self, dish, batch_index):
         updated = False
         for o in self.orders:
-            if o[0] == dish and o[5] == batch_index and o[3]:
-                o[4] = True
+            if o[self.IDX_DISH] == dish and o[self.IDX_BATCH] == batch_index and o[self.IDX_LOCKED] and not o[self.IDX_COMPLETED]:
+                o[self.IDX_READY] = True
                 updated = True
         return updated
 
-    # Remove specific ready order (used for "serve" or "pack" or delete)
+    # Remove specific ready order (used for "serve" or "pack" or delete) - kept for compatibility
     def remove_order(self, dish, bill_number, batch_id=None, remove_all_in_same=False):
         if remove_all_in_same:
-            self.orders = [o for o in self.orders if not (o[0] == dish and o[1] == bill_number and o[4])]
+            self.orders = [o for o in self.orders if not (o[self.IDX_DISH] == dish and o[self.IDX_BILL] == bill_number and o[self.IDX_READY])]
         else:
             removed = False
             new_orders = []
             for o in self.orders:
-                if not removed and o[0] == dish and o[1] == bill_number and o[4]:
+                if not removed and o[self.IDX_DISH] == dish and o[self.IDX_BILL] == bill_number and o[self.IDX_READY]:
                     removed = True
                     continue
                 new_orders.append(o)
@@ -103,15 +114,15 @@ class KitchenManager:
         unlocked = []
         seen = set()
         for o in self.orders:
-            dish = o[0]
+            dish = o[self.IDX_DISH]
             if dish in seen:
                 continue
-            # find orders for the latest unlocked batch for this dish
-            batch_ids = [x[5] for x in self.orders if x[0] == dish and not x[3]]
+            # find orders for the latest unlocked batch for this dish (and not completed)
+            batch_ids = [x[self.IDX_BATCH] for x in self.orders if x[self.IDX_DISH] == dish and not x[self.IDX_LOCKED] and not x[self.IDX_COMPLETED]]
             if not batch_ids:
                 continue
             latest_batch = max(batch_ids)
-            orders = [x for x in self.orders if x[0] == dish and x[5] == latest_batch]
+            orders = [x for x in self.orders if x[self.IDX_DISH] == dish and x[self.IDX_BATCH] == latest_batch and not x[self.IDX_COMPLETED]]
             if orders:
                 unlocked.append((dish, latest_batch, orders))
             seen.add(dish)
@@ -125,7 +136,7 @@ class KitchenManager:
                 dish = b[0]
                 if dish in added:
                     pass
-                orders = [x for x in self.orders if x[0] == dish and x[5] == b[1] and not x[4]]
+                orders = [x for x in self.orders if x[self.IDX_DISH] == dish and x[self.IDX_BATCH] == b[1] and not x[self.IDX_READY] and not x[self.IDX_COMPLETED]]
                 if orders:
                     locked.append((dish, b[1], orders))
                 added.add(dish)
@@ -134,20 +145,21 @@ class KitchenManager:
     def get_ready_bills(self):
         dine_in = []
         delivery = []
-        all_bills = set(o[1] for o in self.orders)
+        all_bills = set(o[self.IDX_BILL] for o in self.orders if not o[self.IDX_COMPLETED])
         for bill in all_bills:
-            bill_orders = [o for o in self.orders if o[1] == bill]
-            if bill_orders and all(o[4] for o in bill_orders):
-                if any(str(o[1]).startswith("Table:") for o in bill_orders):
+            # consider only non-completed items for the bill
+            bill_orders = [o for o in self.orders if o[self.IDX_BILL] == bill and not o[self.IDX_COMPLETED]]
+            if bill_orders and all(o[self.IDX_READY] for o in bill_orders):
+                if any(str(o[self.IDX_BILL]).startswith("Table:") for o in bill_orders):
                     dine_in.append(bill)
                 else:
                     delivery.append(bill)
         # sort dine-in by numeric table
         def table_key(bill):
             for o in self.orders:
-                if o[1] == bill and str(o[1]).startswith("Table:"):
+                if o[self.IDX_BILL] == bill and str(o[self.IDX_BILL]).startswith("Table:"):
                     try:
-                        return int(str(o[1]).split(":")[1])
+                        return int(str(o[self.IDX_BILL]).split(":")[1])
                     except:
                         return float('inf')
             return float('inf')
@@ -208,7 +220,7 @@ class KitchenApp(tk.Tk):
         ttk.Label(self.sidebar, text="Quick Actions", font=self.big_font).pack(padx=12, anchor="w")
         add_sample = ttk.Button(self.sidebar, text="Add sample delivery bills", command=self._add_sample_bills)
         add_sample.pack(fill="x", padx=12, pady=(6,4))
-        clear_all = ttk.Button(self.sidebar, text="Clear all ready orders", command=self._clear_all_ready)
+        clear_all = ttk.Button(self.sidebar, text="Clear all completed orders", command=self._clear_all_ready)
         clear_all.pack(fill="x", padx=12, pady=(0,6))
 
     def _build_pages(self):
@@ -415,7 +427,7 @@ class KitchenApp(tk.Tk):
                       font=("Helvetica", 9)).pack(anchor="w", pady=(2,6))
 
             for o in orders:
-                bill, remark = o[1], o[2]
+                bill, remark = o[self.kitchen.IDX_BILL], o[self.kitchen.IDX_REMARK]
                 rtxt = f" — {remark}" if remark else ""
                 ttk.Label(card, text=f"{bill}{rtxt}", font=("Helvetica", 9)).pack(anchor="w")
 
@@ -443,7 +455,7 @@ class KitchenApp(tk.Tk):
                       font=("Helvetica", 9)).pack(anchor="w", pady=(2,6))
 
             for o in orders:
-                bill, remark = o[1], o[2]
+                bill, remark = o[self.kitchen.IDX_BILL], o[self.kitchen.IDX_REMARK]
                 rtxt = f" — {remark}" if remark else ""
                 ttk.Label(card, text=f"{bill}{rtxt}", font=("Helvetica", 9)).pack(anchor="w")
 
@@ -486,36 +498,34 @@ class KitchenApp(tk.Tk):
     def _populate_dinein(self):
         for w in self.dinein_list_frame.winfo_children():
             w.destroy()
-        ready_dishes = [o for o in self.kitchen.orders if o[4] and str(o[1]).startswith("Table:")]
+        # only show ready AND not completed
+        ready_dishes = [o for o in self.kitchen.orders if o[self.kitchen.IDX_READY] and not o[self.kitchen.IDX_COMPLETED] and str(o[self.kitchen.IDX_BILL]).startswith("Table:")]
         if not ready_dishes:
             ttk.Label(self.dinein_list_frame, text="No dishes ready.", font=self.big_font).pack(anchor="w", pady=8)
             return
         grouped = {}
         for o in ready_dishes:
-            grouped.setdefault(o[1], []).append(o)
+            grouped.setdefault(o[self.kitchen.IDX_BILL], []).append(o)
         for table in sorted(grouped.keys(), key=lambda x: int(x.split(":")[1])):
             card = ttk.Frame(self.dinein_list_frame, relief="raised", padding=8)
             card.pack(fill="x", pady=6)
             ttk.Label(card, text=f"Table {table.split(':')[1]}", font=self.card_font).pack(anchor="w")
             for item in grouped[table]:
-                remark = f" ({item[2]})" if item[2] else ""
+                remark = f" ({item[self.kitchen.IDX_REMARK]})" if item[self.kitchen.IDX_REMARK] else ""
                 row = ttk.Frame(card)
                 row.pack(fill="x", pady=2)
-                ttk.Label(row, text=f"{item[0]}{remark}", font=("Helvetica", 10)).pack(side="left")
+                ttk.Label(row, text=f"{item[self.kitchen.IDX_DISH]}{remark}", font=("Helvetica", 10)).pack(side="left")
                 served_btn = ttk.Button(row, text="Mark Served",
-                                        command=lambda d=item[0], t=item[1]: self._serve_item(d, t))
+                                        command=lambda d=item[self.kitchen.IDX_DISH], t=item[self.kitchen.IDX_BILL]: self._serve_item(d, t))
                 served_btn.pack(side="right")
 
     def _serve_item(self, dish, table):
-        removed = False
-        new_orders = []
+        # mark first matching ready & not completed item as completed
         for o in self.kitchen.orders:
-            if not removed and o[0] == dish and o[1] == table and o[4]:
-                removed = True
-                continue
-            new_orders.append(o)
-        self.kitchen.orders = new_orders
-        messagebox.showinfo("Served", f"{dish} for {table} served.")
+            if o[self.kitchen.IDX_DISH] == dish and o[self.kitchen.IDX_BILL] == table and o[self.kitchen.IDX_READY] and not o[self.kitchen.IDX_COMPLETED]:
+                o[self.kitchen.IDX_COMPLETED] = True
+                messagebox.showinfo("Served", f"{dish} for {table} marked completed.")
+                break
         self._refresh_all_pages()
 
     # ----------------------
@@ -539,15 +549,18 @@ class KitchenApp(tk.Tk):
             card = ttk.Frame(self.delivery_list_frame, relief="raised", padding=8)
             card.pack(fill="x", pady=6)
             ttk.Label(card, text=f"{bill}", font=self.card_font).pack(anchor="w")
-            for o in [x for x in self.kitchen.orders if x[1] == bill]:
-                remark = f" ({o[2]})" if o[2] else ""
-                ttk.Label(card, text=f" - {o[0]}{remark}", font=("Helvetica", 10)).pack(anchor="w")
+            for o in [x for x in self.kitchen.orders if x[self.kitchen.IDX_BILL] == bill and not x[self.kitchen.IDX_COMPLETED]]:
+                remark = f" ({o[self.kitchen.IDX_REMARK]})" if o[self.kitchen.IDX_REMARK] else ""
+                ttk.Label(card, text=f" - {o[self.kitchen.IDX_DISH]}{remark}", font=("Helvetica", 10)).pack(anchor="w")
             btn = ttk.Button(card, text="Mark Packed & Remove", command=lambda b=bill: self._pack_delivery(b))
             btn.pack(anchor="e", pady=6)
 
     def _pack_delivery(self, bill):
-        self.kitchen.orders = [o for o in self.kitchen.orders if o[1] != bill]
-        messagebox.showinfo("Packed", f"{bill} marked as packed.")
+        # mark all ready items for the bill as completed
+        for o in self.kitchen.orders:
+            if o[self.kitchen.IDX_BILL] == bill and o[self.kitchen.IDX_READY] and not o[self.kitchen.IDX_COMPLETED]:
+                o[self.kitchen.IDX_COMPLETED] = True
+        messagebox.showinfo("Packed", f"{bill} marked as packed/completed.")
         self._refresh_all_pages()
 
     # Universal refresh
@@ -571,8 +584,9 @@ class KitchenApp(tk.Tk):
         self._refresh_all_pages()
 
     def _clear_all_ready(self):
-        self.kitchen.orders = [o for o in self.kitchen.orders if not o[4]]
-        messagebox.showinfo("Cleared", "All ready orders removed.")
+        # remove orders that have been completed
+        self.kitchen.orders = [o for o in self.kitchen.orders if not o[self.kitchen.IDX_COMPLETED]]
+        messagebox.showinfo("Cleared", "All completed orders removed.")
         self._refresh_all_pages()
 
 # -----------------------
