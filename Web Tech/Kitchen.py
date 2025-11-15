@@ -4,20 +4,58 @@ from collections import deque
 import time
 
 # -----------------------
+# MongoDB loader
+# -----------------------
+def load_orders_from_mongodb(self, mongo_records):
+    """
+    mongo_records: iterable of dicts from MongoDB.
+    Expected fields in each record:
+        dish, bill_number, remarks, locked, ready, batch_id, timestamp
+    IMPORTANT: 'completed' is NOT fetched.
+    """
+    for rec in mongo_records:
+        dish = rec.get("dish")
+        bill = rec.get("bill_number")
+        remarks = rec.get("remarks", "")
+        locked = rec.get("locked", False)
+        ready = rec.get("ready", False)
+        batch_id = rec.get("batch_id", None)
+        timestamp = rec.get("timestamp", time.time())
+
+        # Keep batches coherent
+        if batch_id is not None:
+            exists = any(b[1] == batch_id for b in self.batches)
+            if not exists:
+                self.batches.append([dish, batch_id, locked, timestamp])
+
+        # Append order, completed flag always False when loading
+        self.orders.append([
+            dish,
+            bill,
+            remarks,
+            locked,
+            ready,
+            batch_id,
+            timestamp,
+            False
+        ])
+
+# -----------------------
 # Kitchen Manager (with completed flag)
 # -----------------------
 class KitchenManager:
-    # index constants to avoid magic numbers
-    IDX_DISH = 0
-    IDX_BILL = 1
-    IDX_REMARK = 2
-    IDX_LOCKED = 3
-    IDX_READY = 4
-    IDX_BATCH = 5
-    IDX_TIMESTAMP = 6
-    IDX_COMPLETED = 7
-
     def __init__(self):
+
+        # index constants for order structure
+        self.IDX_DISH = 0
+        self.IDX_BILL = 1
+        self.IDX_REMARK = 2
+        self.IDX_LOCKED = 3
+        self.IDX_READY = 4
+        self.IDX_BATCH = 5
+        self.IDX_TIMESTAMP = 6
+        self.IDX_COMPLETED = 7
+
         # orders: [dish, bill_number, remarks, locked(bool), ready(bool), batch_id, timestamp_added, completed(bool)]
         self.orders = []
         # batches: [dish, batch_id, locked(bool), timestamp_created]
