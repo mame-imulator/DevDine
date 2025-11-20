@@ -323,9 +323,9 @@ class KitchenManager:
 
         return dine, delivery
 
-    # -------------------------------------------------
-    # UI App
-    # -------------------------------------------------
+# -------------------------------------------------
+# UI App
+# -------------------------------------------------
 class KitchenApp(tk.Tk):
     def __init__(self, kitchen):
         super().__init__()
@@ -577,7 +577,21 @@ class KitchenApp(tk.Tk):
         preparing = self.kitchen.get_locked_batches()
 
         # Reusable function
+        # Patched version of add_batch_cards() for your _populate_chef_panels()
+        # Replace your existing add_batch_cards() with this one.
+
         def add_batch_cards(container, batches, status_label):
+            # If empty → show placeholder
+            if not batches:
+                placeholder = ttk.Label(
+                    container,
+                    text=f"No {status_label.lower()} batches.",
+                    font=("Helvetica", 10, "italic")
+                )
+                placeholder.pack(anchor="w", pady=6, padx=6)
+                return
+
+            # Otherwise render normal cards
             for dish, batch_id, orders in batches:
                 card = ttk.Frame(container, relief="raised", padding=10)
                 card.pack(fill="x", pady=6, padx=6)
@@ -593,7 +607,6 @@ class KitchenApp(tk.Tk):
                         created = b[3]
                         break
 
-                # timestamp text (and register label so it updates)
                 if created:
                     sec = int(time.time() - created)
                     m, s = divmod(sec, 60)
@@ -603,7 +616,6 @@ class KitchenApp(tk.Tk):
                         font=("Helvetica", 9),
                     )
                     lbl.pack(anchor="w", pady=(2, 6))
-                    # store for live updates
                     self.timestamp_labels.append((lbl, batch_id, status_label, created))
                 else:
                     ttk.Label(
@@ -612,7 +624,6 @@ class KitchenApp(tk.Tk):
                         font=("Helvetica", 9),
                     ).pack(anchor="w", pady=(2, 6))
 
-                # SHOW ORDER TYPE + ORDER NUMBER
                 for o in orders:
                     order_no = o[self.kitchen.IDX_ORDER_NO]
                     order_type = o[self.kitchen.IDX_TYPE]
@@ -627,7 +638,6 @@ class KitchenApp(tk.Tk):
                         font=("Helvetica", 9),
                     ).pack(anchor="w")
 
-                # Add buttons
                 if status_label == "Pending":
                     ttk.Button(
                         card,
@@ -638,9 +648,7 @@ class KitchenApp(tk.Tk):
                     ttk.Button(
                         card,
                         text="Mark Ready",
-                        command=lambda d=dish, b=batch_id: self._mark_batch_done(
-                            d, b
-                        ),
+                        command=lambda d=dish, b=batch_id: self._mark_batch_done(d, b),
                     ).pack(anchor="e", pady=4)
 
         # Fill panels
