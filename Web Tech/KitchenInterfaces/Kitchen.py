@@ -10,6 +10,7 @@ client = MongoClient('mongodb://localhost:27017/')
 db = client['dev']  # change database name here
 collection = db['order']  # change collection name here
 limit_collection = db['dish limit']  # collection holding dish limits
+menu_collection = db['menu']   # collection that stores available menu items
 
 # Debugging helper
 try:
@@ -67,6 +68,21 @@ class KitchenManager:
 
             if dish and isinstance(size_int, int) and size_int > 0:
                 self.dish_limits[dish] = size_int
+
+    # -------------------------------------------------
+    # Load available menu from MongoDB
+    # -------------------------------------------------
+    def load_menu_items(self, records):
+        menu = []
+        for r in records:
+            # Use your actual MongoDB field names:
+            dish_name = r.get("dish")
+            is_available = r.get("avalable", False)
+
+            if dish_name and is_available:
+                menu.append(dish_name)
+
+        return menu
 
     def get_limit(self, dish):
         """
@@ -390,7 +406,19 @@ class KitchenManager:
 class KitchenApp(tk.Tk):
     def __init__(self, kitchen):
         super().__init__()
+
+        # FIX: assign kitchen BEFORE using it
         self.kitchen = kitchen
+
+        # Load menu items from Mongo
+        try:
+            menu_records = list(menu_collection.find({}))
+            self.menu_items = self.kitchen.load_menu_items(menu_records)
+            if not self.menu_items:
+                self.menu_items = ["(No items available)"]
+        except Exception as e:
+            print("Menu load failed:", e)
+            self.menu_items = ["(Menu load error)"]
 
         self.title("Kitchen Dashboard")
         self.geometry("1100x650")
@@ -421,6 +449,7 @@ class KitchenApp(tk.Tk):
         # set up periodic feed and timestamp refresher
         self.after(1500, self._periodic_feed_and_refresh)
         self.after(1000, self._start_timestamp_refresher)
+
 
     def _build_sidebar(self):
         ttk.Label(self.sidebar, text="Kitchen Hub", font=("Helvetica", 18, "bold")).pack(
@@ -525,18 +554,17 @@ class KitchenApp(tk.Tk):
         # -------- DISH SELECT --------
         ttk.Label(form, text="Dish:", font=self.big_font).grid(row=2, column=0, sticky="w")
 
-        self.menu_items = [
-            "Margherita Pizza",
-            "Spaghetti Bolognese",
-            "Caesar Salad",
-            "Grilled Chicken",
-            "Tomato Soup",
-        ]
         self.dish_var = tk.StringVar()
+
         dish_box = ttk.Combobox(
-            form, textvariable=self.dish_var, values=self.menu_items,
-            state="readonly", font=self.big_font, width=22
+            form,
+            textvariable=self.dish_var,
+            values=self.menu_items,     # <-- comes from DB now
+            state="readonly",
+            font=self.big_font,
+            width=22
         )
+
         dish_box.grid(row=2, column=1, padx=8, sticky="w")
         self.dish_var.set(self.menu_items[0])
 
