@@ -14,7 +14,7 @@ menu_collection = db['menu']   # collection that stores available menu items
 
 # Debugging helper
 try:
-    for doc in collection.find({}, {'order_type': 1, 'order_number': 1}):
+    for doc in collection.find({}):
         print("Loaded:", doc)
 except Exception as e:
     print("Mongo debug print failed:", e)
@@ -75,9 +75,9 @@ class KitchenManager:
     def load_menu_items(self, records):
         menu = []
         for r in records:
-            # Use your actual MongoDB field names:
+            # accept both spellings for safety
             dish_name = r.get("dish")
-            is_available = r.get("avalable", False)
+            is_available = r.get("available", r.get("avalable", False))
 
             if dish_name and is_available:
                 menu.append(dish_name)
@@ -168,9 +168,21 @@ class KitchenManager:
                     # leave batch_id as-is if it isn't an int
                     pass
 
-            # keep batch list clean
-            if not any(b[1] == batch_id for b in self.batches):
-                self.batches.append([dish, batch_id, locked, timestamp])
+            # keep batch list clean — but compute lock from all related orders
+            existing = next((b for b in self.batches if b[1] == batch_id), None)
+
+            if existing:
+                # update locked if any order in this batch is locked
+                if locked:
+                    existing[2] = True
+            else:
+                # batch lock should be True if ANY associated order is locked
+                batch_locked = any(
+                    o.get("locked", False)
+                    for o in mongo_records
+                    if o.get("dish") == dish and o.get("batch_id") == batch_id
+                )
+                self.batches.append([dish, batch_id, batch_locked, timestamp])
 
             # store order
             self.orders.append([
@@ -185,6 +197,18 @@ class KitchenManager:
                 completed,
                 mongo_id
             ])
+
+        # After loading all records, ensure that if a batch is marked locked,
+        # all orders belonging to that batch are flagged locked in memory too.
+        for b in self.batches:
+            dish, batch_id, batch_locked, _ = b
+            if batch_locked:
+                for o in self.orders:
+                    try:
+                        if o[self.IDX_DISH] == dish and o[self.IDX_BATCH] == batch_id:
+                            o[self.IDX_LOCKED] = True
+                    except Exception:
+                        pass
 
     # -------------------------------------------------
     # Delivery queue
@@ -229,18 +253,18 @@ class KitchenManager:
         return dish
 
     # -------------------------------------------------
-    # Add dine-in order directly
+    # Add dine-in order directly (now order_type-aware)
     # -------------------------------------------------
-    def add_order(self, dish, order_number, remarks=""):
+    def add_order(self, dish, order_number, remarks="", order_type="dine-in"):
         """
-        Adds a dine-in order and returns the batch_id it was assigned to.
+        Adds an order (dine-in or delivery) and returns the batch_id it was assigned to.
         """
         batch_id = self.get_available_batch(dish)
 
         self.orders.append([
             dish,
             order_number,
-            "dine-in",
+            order_type,
             remarks,
             False,
             False,
@@ -256,14 +280,46 @@ class KitchenManager:
     # Batch controls
     # -------------------------------------------------
     def lock_specific_batch(self, dish, batch_id):
+        found = False
+
+        # Lock batch in memory
         for b in self.batches:
-            if b[0] == dish and b[1] == batch_id and not b[2]:
+            if b[0] == dish and b[1] == batch_id:
+                if b[2]:  # already locked
+                    return True
                 b[2] = True
-                for o in self.orders:
-                    if o[self.IDX_DISH] == dish and o[self.IDX_BATCH] == batch_id:
-                        o[self.IDX_LOCKED] = True
-                return True
-        return False
+                found = True
+                break
+
+        if not found:
+            return False
+
+        # Lock orders in memory and try to persist per-order if we have IDs
+        for o in self.orders:
+            if o[self.IDX_DISH] == dish and o[self.IDX_BATCH] == batch_id:
+                o[self.IDX_LOCKED] = True
+
+                # Update MongoDB per-document if we have mongo id
+                if o[self.IDX_MONGO_ID]:
+                    try:
+                        # use the stored id directly (it's already an ObjectId from PyMongo)
+                        collection.update_one(
+                            {"_id": o[self.IDX_MONGO_ID]},
+                            {"$set": {"locked": True}}
+                        )
+                    except Exception as e:
+                        print("Failed to update locked flag for", o[self.IDX_MONGO_ID], e)
+
+        # Also set batch-wide lock in Mongo (best-effort)
+        try:
+            collection.update_many(
+                {"dish": dish, "batch_id": batch_id},
+                {"$set": {"locked": True}}
+            )
+        except Exception as e:
+            print("Failed to update_many locked for batch", dish, batch_id, e)
+
+        return True
 
     def confirm_batch_done(self, dish, batch_id):
         updated = False
@@ -280,11 +336,11 @@ class KitchenManager:
                 if o[self.IDX_MONGO_ID]:
                     try:
                         collection.update_one(
-                            {"_id": ObjectId(o[self.IDX_MONGO_ID])},
+                            {"_id": o[self.IDX_MONGO_ID]},
                             {"$set": {"ready": True}}
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print("Failed to update ready flag for", o[self.IDX_MONGO_ID], e)
 
         return updated
 
@@ -642,7 +698,19 @@ class KitchenApp(tk.Tk):
         self.timestamp_labels = []
 
         pending = self.kitchen.get_unlocked_batches()
+        # FILTER OUT READY BATCHES
+        pending = [
+            (dish, batch, orders)
+            for (dish, batch, orders) in pending
+            if not all(o[self.kitchen.IDX_READY] for o in orders)
+        ]
         preparing = self.kitchen.get_locked_batches()
+        # FILTER OUT READY BATCHES
+        preparing = [
+            (dish, batch, orders)
+            for (dish, batch, orders) in preparing
+            if not all(o[self.kitchen.IDX_READY] for o in orders)
+        ]
 
         # Reusable function
         # Patched version of add_batch_cards() for your _populate_chef_panels()
@@ -789,11 +857,11 @@ class KitchenApp(tk.Tk):
                 if o[self.kitchen.IDX_MONGO_ID]:
                     try:
                         collection.update_one(
-                            {"_id": ObjectId(o[self.kitchen.IDX_MONGO_ID])},
+                            {"_id": o[self.kitchen.IDX_MONGO_ID]},
                             {"$set": {"completed": True}},
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print("Failed to update completed for", o[self.kitchen.IDX_MONGO_ID], e)
 
                 messagebox.showinfo(
                     "Served",
@@ -851,11 +919,11 @@ class KitchenApp(tk.Tk):
                 if o[self.kitchen.IDX_MONGO_ID]:
                     try:
                         collection.update_one(
-                            {"_id": ObjectId(o[self.kitchen.IDX_MONGO_ID])},
+                            {"_id": o[self.kitchen.IDX_MONGO_ID]},
                             {"$set": {"completed": True}},
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print("Failed to update completed for", o[self.kitchen.IDX_MONGO_ID], e)
 
         messagebox.showinfo("Packed", f"{bill} marked completed.")
         self._refresh_all_pages()
@@ -928,13 +996,13 @@ class KitchenApp(tk.Tk):
             messagebox.showwarning("Missing", "Please enter table/bill number.")
             return
 
-        # Add to kitchen system
-        batch_id = self.kitchen.add_order(dish, order_no, remarks)
+        # Add to kitchen system (now passes order_type)
+        batch_id = self.kitchen.add_order(dish, order_no, remarks, order_type)
         print("Assigned batch:", batch_id)
 
-        # Save to Mongo
+        # Save to Mongo and try to write back the mongo_id into the in-memory order
         try:
-            collection.insert_one({
+            res = collection.insert_one({
                 "dish": dish,
                 "order_number": order_no,
                 "order_type": order_type,
@@ -945,7 +1013,14 @@ class KitchenApp(tk.Tk):
                 "timestamp": time.time(),
                 "completed": False,
             })
-        except Exception:
+            inserted_id = res.inserted_id
+
+            # Guarantee correct mapping
+            self.kitchen.orders[-1][self.kitchen.IDX_MONGO_ID] = inserted_id
+
+        except Exception as e:
+            print("Insert failed:", e)
+
             pass
 
         if order_type == "dine-in":
@@ -958,6 +1033,7 @@ class KitchenApp(tk.Tk):
 
     def _toggle_order_type_inputs(self):
         """Updates the label depending on Dine-In vs Delivery"""
+        # kept for extensibility — nothing special required right now
         if self.order_type_var.get() == "dine-in":
             self.order_number_entry.configure()
         else:
