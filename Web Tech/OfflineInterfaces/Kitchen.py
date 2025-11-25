@@ -211,6 +211,69 @@ class KitchenManager:
                         pass
 
     # -------------------------------------------------
+    # LIVE SYNC PATCH — Sync Orders, Menu, Dish Limits
+    # -------------------------------------------------
+
+    def sync_orders(self):
+        """Sync internal orders with MongoDB, detecting new/edited/deleted docs."""
+        try:
+            mongo_records = list(collection.find({}))
+        except Exception as e:
+            print("Order sync failed:", e)
+            return
+
+        # Build maps
+        existing_map = {o[self.IDX_MONGO_ID]: o for o in self.orders if o[self.IDX_MONGO_ID]}
+        mongo_ids = {rec["_id"] for rec in mongo_records}
+
+        # --- NEW ORDERS ---
+        for rec in mongo_records:
+            _id = rec["_id"]
+            if _id not in existing_map:
+                print("NEW ORDER DETECTED:", rec)
+                self.load_orders_from_mongodb([rec])
+
+        # --- UPDATED ORDERS ---
+        for rec in mongo_records:
+            _id = rec["_id"]
+            if _id in existing_map:
+                local = existing_map[_id]
+                local[self.IDX_REMARK]    = rec.get("remarks", local[self.IDX_REMARK])
+                local[self.IDX_LOCKED]    = bool(rec.get("locked", local[self.IDX_LOCKED]))
+                local[self.IDX_READY]     = bool(rec.get("ready", local[self.IDX_READY]))
+                local[self.IDX_COMPLETED] = bool(rec.get("completed", local[self.IDX_COMPLETED]))
+
+        # --- DELETED ORDERS ---
+        for o in list(self.orders):
+            _id = o[self.IDX_MONGO_ID]
+            if _id and _id not in mongo_ids:
+                print("ORDER DELETED:", _id)
+                self.orders.remove(o)
+
+    def sync_menu(self):
+        """Reload menu availability from DB."""
+        try:
+            recs = list(menu_collection.find({}))
+            return self.load_menu_items(recs)
+        except Exception as e:
+            print("Menu sync failed:", e)
+            return self.menu_items
+
+    def sync_dish_limits(self):
+        try:
+            limits = list(limit_collection.find({}))
+            old_limits = dict(self.dish_limits)
+            self.load_dish_limits(limits)
+
+            # Detect change
+            if self.dish_limits != old_limits:
+                print("Dish limits changed → rebuilding batches")
+                self.rebuild_batches_after_limit_change()
+
+        except Exception as e:
+            print("Dish limit sync failed:", e)
+
+    # -------------------------------------------------
     # Delivery queue
     # -------------------------------------------------
     def add_bill_to_queue(self, order_number, items):
@@ -455,6 +518,73 @@ class KitchenManager:
         delivery.sort()
 
         return dine, delivery
+    
+    def refresh_from_mongo(self):
+        """Loads NEW orders from Mongo that are not yet in memory."""
+        try:
+            mongo_records = list(collection.find({}))
+        except Exception as e:
+            print("Mongo refresh failed:", e)
+            return
+
+        existing_ids = {o[self.IDX_MONGO_ID] for o in self.orders if o[self.IDX_MONGO_ID]}
+
+        for rec in mongo_records:
+            _id = rec.get("_id")
+            if _id not in existing_ids:
+                # NEW ORDER → add it normally
+                print("New order found:", rec)
+                self.load_orders_from_mongodb([rec])
+
+    def rebuild_batches_after_limit_change(self):
+        print("Rebuilding batches based on updated dish limits...")
+
+        self.batches = []
+        self.batch_counter = 0
+
+        orders_by_dish = {}
+        for o in self.orders:
+            if not o[self.IDX_COMPLETED]:
+                orders_by_dish.setdefault(o[self.IDX_DISH], []).append(o)
+
+        bulk_ops = []
+
+        for dish, orders in orders_by_dish.items():
+            limit = self.get_limit(dish)
+            orders.sort(key=lambda o: o[self.IDX_TIMESTAMP])
+
+            batch_id = None
+            count_in_batch = 0
+
+            for o in orders:
+                if batch_id is None or count_in_batch >= limit:
+                    self.batch_counter += 1
+                    batch_id = self.batch_counter
+                    count_in_batch = 0
+                    locked = any(o2[self.IDX_LOCKED] for o2 in orders if o2[self.IDX_BATCH] == batch_id)
+                    self.batches.append([dish, batch_id, locked, o[self.IDX_TIMESTAMP]])
+
+                old_batch = o[self.IDX_BATCH]
+                if old_batch != batch_id:
+                    o[self.IDX_BATCH] = batch_id
+                    mongo_id = o[self.IDX_MONGO_ID]
+                    if mongo_id:
+                        bulk_ops.append(
+                            {"update_one": {"filter": {"_id": mongo_id}, "update": {"$set": {"batch_id": batch_id}}}}
+                        )
+
+                count_in_batch += 1
+
+        # Execute bulk updates
+        if bulk_ops:
+            try:
+                for op in bulk_ops:
+                    collection.update_one(**op["update_one"])
+            except Exception as e:
+                print("Failed to bulk update batch_ids in Mongo:", e)
+
+        print("Batch rebuild finished.")
+
 
     # -------------------------------------------------
     # UI App
@@ -506,6 +636,8 @@ class KitchenApp(tk.Tk):
         self.after(1500, self._periodic_feed_and_refresh)
         self.after(1000, self._start_timestamp_refresher)
 
+        self.after(1000, self._poll_mongo_new_orders)
+        self.after(1000, self._poll_all_mongo_data)
 
     def _build_sidebar(self):
         ttk.Label(self.sidebar, text="Kitchen Hub", font=("Helvetica", 18, "bold")).pack(
@@ -603,7 +735,8 @@ class KitchenApp(tk.Tk):
                         command=self._toggle_order_type_inputs).grid(row=0, column=2, padx=10)
 
         # -------- TABLE / BILL INPUT (dynamic) --------
-        ttk.Label(form, text="Table / Bill Number:", font=self.big_font).grid(row=1, column=0, sticky="w")
+        self.table_bill_label = ttk.Label(form, text="Table Number:", font=self.big_font)
+        self.table_bill_label.grid(row=1, column=0, sticky="w")
         self.order_number_entry = ttk.Entry(form, width=12, font=self.big_font)
         self.order_number_entry.grid(row=1, column=1, padx=8, sticky="w")
 
@@ -688,106 +821,95 @@ class KitchenApp(tk.Tk):
     # Populate Chef panels (FIXED to show ORDER TYPE)
     # -------------------------------------------------
     def _populate_chef_panels(self):
-        # Clear old cards
-        for w in self.pending_inner.winfo_children():
-            w.destroy()
-        for w in self.prep_inner.winfo_children():
-            w.destroy()
+        # CLEAR OLD CARDS
+        for widget in self.pending_inner.winfo_children():
+            widget.destroy()
+        for widget in self.prep_inner.winfo_children():
+            widget.destroy()
 
-        # reset timestamp label tracking (we'll repopulate)
+        # Reset timestamp labels to avoid duplicates
         self.timestamp_labels = []
 
-        pending = self.kitchen.get_unlocked_batches()
-        # FILTER OUT READY BATCHES
-        pending = [
+        # Save scroll positions
+        pending_y = self.pending_canvas.yview()
+        prep_y = self.prep_canvas.yview()
+
+        # Prepare new lists
+        self.pending_cards = []
+        self.prep_cards = []
+
+        # Fetch batches
+        pending_batches = [
             (dish, batch, orders)
-            for (dish, batch, orders) in pending
+            for (dish, batch, orders) in self.kitchen.get_unlocked_batches()
             if not all(o[self.kitchen.IDX_READY] for o in orders)
         ]
-        preparing = self.kitchen.get_locked_batches()
-        # FILTER OUT READY BATCHES
-        preparing = [
+        prep_batches = [
             (dish, batch, orders)
-            for (dish, batch, orders) in preparing
+            for (dish, batch, orders) in self.kitchen.get_locked_batches()
             if not all(o[self.kitchen.IDX_READY] for o in orders)
         ]
 
-        # Reusable function
-        # Patched version of add_batch_cards() for your _populate_chef_panels()
-        def add_batch_cards(container, batches, status_label):
-            # If empty → show placeholder
-            if not batches:
-                placeholder = ttk.Label(
-                    container,
-                    text=f"No {status_label.lower()} batches.",
-                    font=("Helvetica", 10, "italic")
-                )
-                placeholder.pack(anchor="w", pady=6, padx=6)
-                return
-
-            # Otherwise render normal cards
+        def create_cards(container, batches, status_label):
+            cards = []
             for dish, batch_id, orders in batches:
-                card = ttk.Frame(container, relief="raised", padding=10)
-                card.pack(fill="x", pady=6, padx=6)
+                frame = ttk.Frame(container, relief="raised", padding=10)
+                frame.pack(fill="x", pady=6, padx=6)
 
-                ttk.Label(
-                    card, text=f"{dish} — x{len(orders)}", font=self.card_font
-                ).pack(anchor="w")
+                ttk.Label(frame, text=f"{dish} — x{len(orders)}", font=("Helvetica", 11)).pack(anchor="w")
 
-                # find timestamp
-                created = None
-                for b in self.kitchen.batches:
-                    if b[1] == batch_id:
-                        created = b[3]
-                        break
-
+                created = next((b[3] for b in self.kitchen.batches if b[1] == batch_id), None)
                 if created:
                     sec = int(time.time() - created)
                     m, s = divmod(sec, 60)
-                    lbl = ttk.Label(
-                        card,
-                        text=f"Batch #{batch_id}  •  {status_label}  •  {m:02d}:{s:02d}",
-                        font=("Helvetica", 9),
-                    )
-                    lbl.pack(anchor="w", pady=(2, 6))
+                    lbl = ttk.Label(frame, text=f"Batch #{batch_id} • {status_label} • {m:02d}:{s:02d}", font=("Helvetica", 9))
+                    lbl.pack(anchor="w", pady=(2,6))
                     self.timestamp_labels.append((lbl, batch_id, status_label, created))
                 else:
-                    ttk.Label(
-                        card,
-                        text=f"Batch #{batch_id}  •  {status_label}",
-                        font=("Helvetica", 9),
-                    ).pack(anchor="w", pady=(2, 6))
+                    ttk.Label(frame, text=f"Batch #{batch_id} • {status_label}", font=("Helvetica", 9)).pack(anchor="w", pady=(2,6))
 
+                order_labels = []
                 for o in orders:
                     order_no = o[self.kitchen.IDX_ORDER_NO]
                     order_type = o[self.kitchen.IDX_TYPE]
                     remark = o[self.kitchen.IDX_REMARK]
-
                     type_str = " (dine-in)" if order_type == "dine-in" else " (delivery)"
                     remark_str = f" — {remark}" if remark else ""
-
-                    ttk.Label(
-                        card,
-                        text=f"{order_no}{type_str}{remark_str}",
-                        font=("Helvetica", 9),
-                    ).pack(anchor="w")
+                    lbl = ttk.Label(frame, text=f"{order_no}{type_str}{remark_str}", font=("Helvetica", 9))
+                    lbl.pack(anchor="w")
+                    order_labels.append(lbl)
 
                 if status_label == "Pending":
-                    ttk.Button(
-                        card,
-                        text="Confirm (Start)",
-                        command=lambda d=dish, b=batch_id: self._lock_batch(d, b),
-                    ).pack(anchor="e", pady=4)
+                    ttk.Button(frame, text="Confirm (Start)",
+                            command=lambda d=dish, b=batch_id: self._lock_batch(d, b)).pack(anchor="e", pady=4)
                 else:
-                    ttk.Button(
-                        card,
-                        text="Mark Ready",
-                        command=lambda d=dish, b=batch_id: self._mark_batch_done(d, b),
-                    ).pack(anchor="e", pady=4)
+                    ttk.Button(frame, text="Mark Ready",
+                            command=lambda d=dish, b=batch_id: self._mark_batch_done(d, b)).pack(anchor="e", pady=4)
 
-        # Fill panels
-        add_batch_cards(self.pending_inner, pending, "Pending")
-        add_batch_cards(self.prep_inner, preparing, "Preparing")
+                card = type('Card', (), {})()
+                card.frame = frame
+                card.batch_key = (dish, batch_id)
+                card.order_labels = order_labels
+                cards.append(card)
+            return cards
+
+        # Create new cards
+        self.pending_cards = create_cards(self.pending_inner, pending_batches, "Pending")
+        self.prep_cards = create_cards(self.prep_inner, prep_batches, "Preparing")
+
+        # Add placeholders if empty
+        if not pending_batches:
+            lbl = ttk.Label(self.pending_inner, text="No pending batches.", font=("Helvetica", 10, "italic"))
+            lbl.pack(anchor="w", pady=6, padx=6)
+            lbl.is_placeholder = True
+        if not prep_batches:
+            lbl = ttk.Label(self.prep_inner, text="No preparing batches.", font=("Helvetica", 10, "italic"))
+            lbl.pack(anchor="w", pady=6, padx=6)
+            lbl.is_placeholder = True
+
+        # Restore scroll positions
+        self.pending_canvas.yview_moveto(pending_y[0])
+        self.prep_canvas.yview_moveto(prep_y[0])
 
     # -------------------------------------------------
     # DINE-IN PAGE
@@ -947,20 +1069,25 @@ class KitchenApp(tk.Tk):
     # timestamp updater
     def _start_timestamp_refresher(self):
         now = time.time()
-        new_list = []
-        for entry in list(self.timestamp_labels):
+        for lbl, batch_id, status, created in self.timestamp_labels:
             try:
-                lbl, batch_id, status, created = entry
                 sec = int(now - created)
                 m, s = divmod(sec, 60)
                 lbl.config(text=f"Batch #{batch_id} • {status} • {m:02d}:{s:02d}")
-                new_list.append(entry)
             except Exception:
-                # skip problematic entries
                 pass
-        # replace list to keep references accurate
-        self.timestamp_labels = new_list
         self.after(1000, self._start_timestamp_refresher)
+
+
+    def _poll_mongo_new_orders(self):
+        try:
+            self.kitchen.refresh_from_mongo()
+            self._refresh_all_pages()
+        except Exception as e:
+            print("Mongo polling error:", e)
+
+        # run again in 1 sec
+        self.after(1000, self._poll_mongo_new_orders)
 
     # samples
     def _add_sample_bills(self):
@@ -982,6 +1109,41 @@ class KitchenApp(tk.Tk):
         ]
         messagebox.showinfo("Cleared", "Completed cleared.")
         self._refresh_all_pages()
+
+    # -------------------------------------------------
+    # LIVE SYNC PATCH — Poll MongoDB and refresh UI
+    # -------------------------------------------------
+    def _poll_all_mongo_data(self):
+        """Refresh program state when MongoDB is edited externally."""
+        try:
+            # SYNC ORDERS
+            self.kitchen.sync_orders()
+
+            # SYNC DISH LIMITS
+            self.kitchen.sync_dish_limits()
+
+            # SYNC MENU (if changed, update combobox)
+            new_menu = self.kitchen.sync_menu()
+            if new_menu != self.menu_items:
+                self.menu_items = new_menu
+                try:
+                    # Update combo on order page
+                    for page in self.pages.values():
+                        for w in page.winfo_children():
+                            if isinstance(w, ttk.Frame):
+                                for child in w.winfo_children():
+                                    if isinstance(child, ttk.Combobox):
+                                        child['values'] = self.menu_items
+                except:
+                    pass
+
+            # Refresh UI
+            self._refresh_all_pages()
+
+        except Exception as e:
+            print("Mongo polling error:", e)
+
+        self.after(1000, self._poll_all_mongo_data)
 
     # -------------------------------------------------
     # New / Fixed helper methods for missing functionality
@@ -1033,11 +1195,9 @@ class KitchenApp(tk.Tk):
 
     def _toggle_order_type_inputs(self):
         """Updates the label depending on Dine-In vs Delivery"""
-        # kept for extensibility — nothing special required right now
-        if self.order_type_var.get() == "dine-in":
-            self.order_number_entry.configure()
-        else:
-            self.order_number_entry.configure()
+        label_text = "Table Number:" if self.order_type_var.get() == "dine-in" else "Bill Number:"
+        if hasattr(self, "table_bill_label"):
+            self.table_bill_label.config(text=label_text)
 
     def _lock_batch(self, dish, batch_id):
         ok = self.kitchen.lock_specific_batch(dish, batch_id)
