@@ -451,19 +451,21 @@ class KitchenManager:
 
     def get_locked_batches(self):
         """
-        Return a list of (dish, batch_id, orders_in_batch) for ALL locked batches,
-        whether orders are complete or not. (Your UI may filter further if needed.)
+        Return locked batches that still contain active (not completed) orders.
+        Prevents flickering between Pending/Preparing.
         """
         result = []
 
-        # Organize orders by (dish, batch_id)
+        # Group ONLY active (not completed) orders
         orders_by_batch = {}
         for o in self.orders:
+            if o[self.IDX_COMPLETED]:
+                continue
             dish = o[self.IDX_DISH]
             batch = o[self.IDX_BATCH]
             orders_by_batch.setdefault((dish, batch), []).append(o)
 
-        # Filter batches: must exist + locked
+        # Now filter locked batches
         for (dish, batch), orders in orders_by_batch.items():
             batch_info = next(
                 (b for b in self.batches if b[0] == dish and b[1] == batch),
@@ -474,7 +476,7 @@ class KitchenManager:
 
             locked = batch_info[2]
             if not locked:
-                continue  # skip unlocked batches
+                continue
 
             result.append((dish, batch, orders))
 
